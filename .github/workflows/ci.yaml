@@ -16,91 +16,14 @@ on:
     - master
 
 jobs:
-  flake-check:
-    name: Flake check
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-      with:
-        fetch-depth: 0 # Nix Flakes doesn't work on shallow clones
-
-    - name: Install Nix (flakes, nixpkgs-unstable)
-      uses: cachix/install-nix-action@v16
-      with:
-        install_url: https://github.com/numtide/nix-flakes-installer/releases/download/nix-2.4pre20201221_9fab14a/install
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-        nix_path: nixpkgs=channel:nixpkgs-unstable
-
-    - name: Check flake
-      run: nix flake check -v --show-trace --no-update-lock-file
-
-  check-sync-script:
-    name: Check sync script is deterministic
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-
-    - name: Install python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'
-
-    - name: Install python packages
-      run: pip3 install -r ./scripts/requirements.txt
-
-    - name: Clean the latest version of each channel
-      run: |
-        for channel in stable beta nightly; do
-          version=$(sed -nE 's/.*latest = "(.*?)".*/\1/p' "./manifests/$channel/default.nix")
-          echo "Remove $channel $version"
-          rm "./manifests/$channel/default.nix"
-          if [[ "$channel" == "stable" ]]; then
-            rm "./manifests/$channel/$version.nix"
-          else
-            rm "./manifests/$channel/${version%%-*}/$version.nix"
-          fi
-        done
-
-    - name: Re-fetch latest stable
-      run: python3 ./scripts/fetch.py stable
-
-    - name: Re-fetch latest beta
-      run: python3 ./scripts/fetch.py beta
-
-    - name: Re-fetch latest nightly
-      run: python3 ./scripts/fetch.py nightly
-
-    - name: Check file changes
-      run: |
-        short_status=$(git status --short)
-        echo "$short_status"
-        shopt -s extglob
-        while read -r change; do
-          case "$change" in
-            # Okay if there is no change.
-            "" ) ;;
-            "?? "manifests/@(stable|nightly|beta)/* ) ;;
-            "M "manifests/@(renames.nix|targets.nix) ) ;;
-            "M "manifests/@(stable|nightly|beta)/default.nix ) ;;
-            * )
-              echo "Unexpected change: $change"
-              exit 1
-          esac
-        done <<<"$short_status"
-
   test-rust:
     name: Test Rust
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        channel: [stable, beta]
-        profile: [minimal, default]
+        channel: [nightly]
+        profile: [default]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -115,59 +38,23 @@ jobs:
     - name: Prepare nix-shell and Rust crates
       run: |
         cd examples/hello-world
-        nix-shell --pure --argstr profile ${{ matrix.profile }} --command "unset SSL_CERT_FILE; cargo metadata --format-version=1 >/dev/null"
-
-    - name: Test cargo build
-      run: |
-        cd examples/hello-world
-        set -o pipefail
-        nix-shell --pure --argstr profile ${{ matrix.profile }} --command "make run" | tee out
-        [[ "$(< out)" == *"Hello, world!"* ]]
-        rm -rf target
-
-    - name: Test cargo fmt
-      if: matrix.profile == 'default'
-      run: |
-        cd examples/hello-world
-        nix-shell --pure --argstr profile ${{ matrix.profile }} --command "cargo fmt -- --check"
-        rm -rf target
+        nix-shell --pure \
+          --argstr profile ${{ matrix.profile }} \
+          --argstr channel ${{ matrix.channel }} \
+          --command "unset SSL_CERT_FILE; cargo metadata --format-version=1 >/dev/null"
 
     - name: Test cargo clippy
       if: matrix.profile == 'default'
       run: |
         cd examples/hello-world
         set -o pipefail
-        nix-shell --pure --argstr profile ${{ matrix.profile }} --command "cargo clippy -- --cap-lints=warn" 2>&1 | tee out
+        ls -l ~/.cargo || true
+        ls -l ~/.cargo/bin || true
+        rm -rf ~/.cargo/bin
+        nix-shell --pure \
+          --argstr profile ${{ matrix.profile }} \
+          --argstr channel ${{ matrix.channel }} \
+          --command "type cc rustc cargo cargo-clippy clippy-driver; env RUSTFLAGS=-Zprint-link-args cargo clippy -- --cap-lints=warn" 2>&1 | tee out || true
+        nix-shell -p patchelf --command 'patchelf --print-rpath target/debug/deps/libthiserror_impl-*.so'
         [[ "$(< out)" == *"warning: this loop never actually loops"* ]]
         rm -rf target
-
-  test-cross-examples:
-    name: Test cross compilation examples
-    if: ${{ github.event.workflow_run.conclusion != 'failure' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        example: [cross-aarch64, cross-wasi]
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-
-    - name: Install Nix
-      uses: cachix/install-nix-action@v16
-      with:
-        nix_path: nixpkgs=channel:nixpkgs-unstable
-
-    - name: Prepare nix-shell
-      run: |
-        cd examples/${{ matrix.example }}
-        nix-shell --pure --command true
-
-    - name: Build and run example
-      run: |
-        cd examples/${{ matrix.example }}
-        set -o pipefail
-        # No --pure since it requires CA cert access for crates downloading.
-        nix-shell --command "make run" | tee out
-        [[ "$(< out)" == *"Hello, world!"* ]]

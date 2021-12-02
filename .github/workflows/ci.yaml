@@ -112,10 +112,10 @@ jobs:
       with:
         nix_path: nixpkgs=channel:nixpkgs-unstable
 
-    - name: Prepare nix-shell
+    - name: Prepare nix-shell and Rust crates
       run: |
         cd examples/hello-world
-        nix-shell --pure --argstr profile ${{ matrix.profile }} --command true
+        nix-shell --pure --argstr profile ${{ matrix.profile }} --command "unset SSL_CERT_FILE; cargo metadata --format-version=1 >/dev/null"
 
     - name: Test cargo build
       run: |
@@ -123,12 +123,14 @@ jobs:
         set -o pipefail
         nix-shell --pure --argstr profile ${{ matrix.profile }} --command "make run" | tee out
         [[ "$(< out)" == *"Hello, world!"* ]]
+        rm -rf target
 
     - name: Test cargo fmt
       if: matrix.profile == 'default'
       run: |
         cd examples/hello-world
         nix-shell --pure --argstr profile ${{ matrix.profile }} --command "cargo fmt -- --check"
+        rm -rf target
 
     - name: Test cargo clippy
       if: matrix.profile == 'default'
@@ -137,6 +139,7 @@ jobs:
         set -o pipefail
         nix-shell --pure --argstr profile ${{ matrix.profile }} --command "cargo clippy -- --cap-lints=warn" 2>&1 | tee out
         [[ "$(< out)" == *"warning: this loop never actually loops"* ]]
+        rm -rf target
 
   test-cross-examples:
     name: Test cross compilation examples

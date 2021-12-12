@@ -1,5 +1,5 @@
 # Define component derivations and special treatments.
-{ lib, stdenv, gnutar, autoPatchelfHook, zlib
+{ lib, stdenv, gnutar, autoPatchelfHook, zlib, callPackage
 , toRustTarget, removeNulls
 }:
 # Release version of the whole set.
@@ -15,7 +15,7 @@ let
   inherit (lib) elem mapAttrs optional optionalString;
   inherit (stdenv) hostPlatform;
 
-  mkComponent = pname: src: let
+  mkComponent = final: pname: src: let
     # These components link to `librustc_driver*.so` or `libLLVM*.so`.
     linksToRustc = elem pname [ "clippy-preview" "rls-preview" "miri-preview" "rustc-dev" ];
   in
@@ -35,7 +35,7 @@ let
 
       buildInputs =
         optional (elem pname [ "rustc" "cargo" "llvm-tools-preview" ]) zlib ++
-        optional linksToRustc self.rustc;
+        optional linksToRustc final.rustc;
 
       dontConfigure = true;
       dontBuild = true;
@@ -75,16 +75,29 @@ let
       # Darwin binaries usually just work... except for these linking to rustc from another drv.
       postFixup = optionalString (hostPlatform.isDarwin && linksToRustc) ''
         for f in $out/bin/*; do
-          install_name_tool -add_rpath "${self.rustc}/lib" "$f" || true
+          install_name_tool -add_rpath "${final.rustc}/lib" "$f" || true
         done
       '';
 
       dontStrip = true;
     };
 
-  self = mapAttrs mkComponent srcs;
+  overlays = [
+    # Original components.
+    (final: prev: mapAttrs (mkComponent final) srcs)
+
+    (final: prev: {
+      # miri-preview = prev.miri-preview { }
+      miri-sysroot = callPackage ./miri-sysroot.nix {
+        inherit toRustTarget;
+        inherit (final) rustc cargo rust-std rust-src miri-preview;
+      };
+    })
+
+    # Renames.
+    (final: prev: mapAttrs (alias: { to }: prev.${to} or null) renames)
+  ];
 
 in
   removeNulls (
-    self //
-    mapAttrs (alias: { to }: self.${to} or null) renames)
+    lib.fix (lib.foldl' (lib.flip lib.extends) (final: {}) overlays))

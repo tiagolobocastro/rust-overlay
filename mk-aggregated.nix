@@ -20,8 +20,10 @@ symlinkJoin {
   # CC for crate linking.
   # Workaround: should be `pkgsHostTarget.cc` but `stdenv`'s cc itself have -1 offset.
   # N.B. WASM targets don't need our CC.
+#  propagatedBuildInputs =
+#    optional (!targetPlatform.isWasm) pkgsTargetTarget.stdenv.cc;
   propagatedBuildInputs =
-    optional (!targetPlatform.isWasm) pkgsTargetTarget.stdenv.cc;
+        optional (pname == "rustssc") [ ];
 
   # Link dependency for target, required by darwin std.
   depsTargetTargetPropagated =

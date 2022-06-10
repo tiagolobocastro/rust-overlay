@@ -15,7 +15,7 @@ symlinkJoin {
 
   # CC for build script linking.
   # Workaround: should be `pkgsHostHost.cc` but `stdenv`'s cc itself have -1 offset.
-  depsHostHostPropagated = [ stdenv.cc ];
+  depsHostHostPropagated = [ ];
 
   # CC for crate linking.
   # Workaround: should be `pkgsHostTarget.cc` but `stdenv`'s cc itself have -1 offset.

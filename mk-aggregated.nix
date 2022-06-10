@@ -23,7 +23,7 @@ symlinkJoin {
 #  propagatedBuildInputs =
 #    optional (!targetPlatform.isWasm) pkgsTargetTarget.stdenv.cc;
   propagatedBuildInputs =
-        optional (pname == "rustssc") [ ];
+        optional (pname == "rustssc") [  ];
 
   # Link dependency for target, required by darwin std.
   depsTargetTargetPropagated =
